@@ -1,0 +1,16 @@
+# AllocationModel — Python dependencies
+# Install with: pip install -r requirements.txt
+# Requires Python 3.9+
+
+# Optimisation
+pulp>=2.7.0
+
+# Data I/O (cross-platform Excel + CSV — replaces win32com)
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# GUI
+customtkinter>=5.2.0
+
+# Machine Learning
+scikit-learn>=1.3.0
