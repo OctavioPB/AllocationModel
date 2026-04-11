@@ -16,12 +16,17 @@ remains responsive during long solves.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import tkinter as tk
 import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 from pathlib import Path
 from typing import Optional
+
+# Resolve project root so icon can be found regardless of working directory
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_ICON_PATH = _PROJECT_ROOT / "assets" / "icon.png"
 
 import customtkinter as ctk
 import pandas as pd
@@ -834,6 +839,13 @@ class App(ctk.CTk):
         self.title("AllocationModel")
         self.geometry("960x780")
         self.minsize(860, 660)
+
+        # Window icon (best-effort — silently skipped if file is missing)
+        try:
+            icon = tk.PhotoImage(file=str(_ICON_PATH))
+            self.wm_iconphoto(True, icon)
+        except Exception:
+            pass
 
         self.ctx = AppState()
 
