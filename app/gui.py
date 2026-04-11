@@ -30,6 +30,7 @@ _ICON_PATH = _PROJECT_ROOT / "assets" / "icon.png"
 
 import customtkinter as ctk
 import pandas as pd
+from tkextrafont import Font as ExtraFont
 
 from app.data_loader import AllocationInput, AllocationResult, load_file, get_raw_dataframes
 from app.ml_classifier import classify_deals, apply_classification, ClassificationSummary
@@ -38,24 +39,77 @@ from app.sensitivity import compute_sensitivity, what_if, SensitivityModel
 from app.exporter import export_csv, export_excel
 
 # ---------------------------------------------------------------------------
-# Theme
+# Theme — light, brand-driven palette
 # ---------------------------------------------------------------------------
-ctk.set_appearance_mode("System")
+ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
-_FONT_TITLE   = ("Segoe UI", 20, "bold")
-_FONT_HEADING = ("Segoe UI", 14, "bold")
-_FONT_BODY    = ("Segoe UI", 13)
-_FONT_MONO    = ("Courier New", 11)
-_FONT_SMALL   = ("Segoe UI", 11)
+# Brand palette
+_BG_PAGE    = "#F4F6F9"   # page / screen background
+_BG_SURFACE = "#FFFFFF"   # cards, tables, log box
+_BG_NAV     = "#003366"   # step bar, top nav strip
+_BRAND      = "#003366"   # section headers, borders, labels
+_ACCENT     = "#C8982A"   # CTAs, active step, dividers, primary buttons
+_TEXT_DARK  = "#1A2033"   # primary body text on light bg
+_TEXT_MUTED = "#6B7280"   # secondary / hint text
+_TEXT_WHITE = "#FFFFFF"   # text on dark surfaces
 
-_COLOR_SUCCESS  = "#2fa84f"
-_COLOR_WARNING  = "#e07b00"
-_COLOR_ERROR    = "#d63031"
-_COLOR_NEUTRAL  = "#888888"
-_COLOR_UNALLOC  = "#e17055"
+_COLOR_SUCCESS = "#1A7A4A"
+_COLOR_WARNING = _ACCENT
+_COLOR_ERROR   = "#C0392B"
+_COLOR_NEUTRAL = _TEXT_MUTED
+_COLOR_UNALLOC = _COLOR_ERROR
 
 _STEP_LABELS = ["  1  Load Data  ", "  2  Configure  ", "  3  Results  "]
+
+# Font paths (assets/fonts/ relative to project root)
+_FONTS_DIR = _PROJECT_ROOT / "assets" / "fonts"
+_FONT_FILE_DISPLAY = _FONTS_DIR / "FrauncesSemiBold.ttf"
+_FONT_FILE_BODY    = _FONTS_DIR / "PlusJakartaSansVariable.ttf"
+
+# Family names as registered by tkextrafont
+_FF_DISPLAY = "Fraunces"
+_FF_BODY    = "Plus Jakarta Sans"
+
+# Will be populated by _load_fonts() once a Tk root exists
+_FONTS_LOADED = False
+
+
+def _load_fonts(root) -> None:
+    """Register custom fonts with Tk. Safe to call multiple times."""
+    global _FONTS_LOADED
+    if _FONTS_LOADED:
+        return
+    try:
+        if _FONT_FILE_DISPLAY.exists():
+            ExtraFont(file=str(_FONT_FILE_DISPLAY), family=_FF_DISPLAY, root=root)
+        if _FONT_FILE_BODY.exists():
+            ExtraFont(file=str(_FONT_FILE_BODY), family=_FF_BODY, root=root)
+        _FONTS_LOADED = True
+    except Exception:
+        pass  # Fall back to system fonts silently
+
+
+def _ff(display: bool = False) -> str:
+    """Return the correct font family string, with system fallback."""
+    if display:
+        return _FF_DISPLAY if _FONTS_LOADED else "Georgia"
+    return _FF_BODY if _FONTS_LOADED else "Segoe UI"
+
+
+# Font tuples — defined as functions so they pick up the loaded families
+def _font_title()   -> tuple: return (_ff(True),  20, "bold")
+def _font_heading() -> tuple: return (_ff(True),  14, "bold")
+def _font_body()    -> tuple: return (_ff(False), 13)
+def _font_small()   -> tuple: return (_ff(False), 11)
+def _font_mono()    -> tuple: return ("Courier New", 11)
+
+# Convenience aliases used throughout (evaluated after _load_fonts is called)
+_FONT_TITLE   = ("Georgia",    20, "bold")   # overwritten at App.__init__
+_FONT_HEADING = ("Georgia",    14, "bold")
+_FONT_BODY    = ("Segoe UI",   13)
+_FONT_SMALL   = ("Segoe UI",   11)
+_FONT_MONO    = ("Courier New",11)
 
 
 # ---------------------------------------------------------------------------
@@ -64,12 +118,15 @@ _STEP_LABELS = ["  1  Load Data  ", "  2  Configure  ", "  3  Results  "]
 
 class _SectionLabel(ctk.CTkLabel):
     def __init__(self, parent, text: str, **kwargs):
-        super().__init__(parent, text=text, font=_FONT_HEADING, anchor="w", **kwargs)
+        super().__init__(
+            parent, text=text, font=_FONT_HEADING,
+            anchor="w", text_color=_BRAND, **kwargs,
+        )
 
 
 class _Divider(ctk.CTkFrame):
     def __init__(self, parent, **kwargs):
-        super().__init__(parent, height=2, fg_color=("gray80", "gray30"), **kwargs)
+        super().__init__(parent, height=2, fg_color=_ACCENT, **kwargs)
 
 
 class _ScrollableTable(ctk.CTkScrollableFrame):
@@ -80,23 +137,25 @@ class _ScrollableTable(ctk.CTkScrollableFrame):
         self._render(df, highlight_col)
 
     def _render(self, df: pd.DataFrame, highlight_col: Optional[str]):
-        # Header row
+        # Header row — brand background, white text
         for col_idx, col in enumerate(df.columns):
             ctk.CTkLabel(
                 self, text=str(col), font=_FONT_BODY,
-                fg_color=("gray85", "gray25"),
+                fg_color=_BRAND, text_color=_TEXT_WHITE,
                 corner_radius=4, padx=8, pady=4, anchor="w",
             ).grid(row=0, column=col_idx, sticky="ew", padx=2, pady=2)
 
         # Data rows
         for row_idx, row in df.iterrows():
+            row_bg = _BG_SURFACE if row_idx % 2 == 0 else "#EEF1F6"
             for col_idx, col in enumerate(df.columns):
                 val  = row[col]
                 is_unalloc = highlight_col and col == highlight_col and str(val) == "Unallocated"
-                text_color = _COLOR_UNALLOC if is_unalloc else ("gray10", "gray90")
+                text_color = _COLOR_UNALLOC if is_unalloc else _TEXT_DARK
                 ctk.CTkLabel(
                     self, text=str(val), font=_FONT_SMALL,
-                    text_color=text_color, anchor="w", padx=8,
+                    text_color=text_color, fg_color=row_bg,
+                    anchor="w", padx=8,
                 ).grid(row=row_idx + 1, column=col_idx, sticky="ew", padx=2, pady=1)
 
         for col_idx in range(len(df.columns)):
@@ -104,19 +163,23 @@ class _ScrollableTable(ctk.CTkScrollableFrame):
 
 
 class _StepBar(ctk.CTkFrame):
-    """Top progress bar showing the 3 wizard steps."""
+    """Top navigation bar showing the 3 wizard steps on a brand-color strip."""
 
     def __init__(self, parent, **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color=_BG_NAV, corner_radius=8, **kwargs)
         self._buttons: list[ctk.CTkButton] = []
         for i, label in enumerate(_STEP_LABELS):
             btn = ctk.CTkButton(
                 self, text=label, font=_FONT_SMALL,
-                state="disabled", fg_color="transparent",
-                border_width=1, corner_radius=6,
-                text_color=("gray60", "gray50"),
+                state="disabled",
+                fg_color="transparent",
+                hover_color="#004080",
+                border_width=1,
+                border_color="#335577",
+                corner_radius=6,
+                text_color="#99AABB",
             )
-            btn.grid(row=0, column=i, padx=6, pady=6)
+            btn.grid(row=0, column=i, padx=8, pady=8)
             self._buttons.append(btn)
         self.grid_columnconfigure((0, 1, 2), weight=1)
 
@@ -124,22 +187,28 @@ class _StepBar(ctk.CTkFrame):
         """Highlight the active step (0-indexed)."""
         for i, btn in enumerate(self._buttons):
             if i == step:
+                # Active: accent fill, white text
                 btn.configure(
-                    fg_color=("gray20", "gray80"),
-                    text_color=("white", "gray10"),
-                    border_color=("gray20", "gray80"),
+                    fg_color=_ACCENT,
+                    hover_color="#B5851E",
+                    text_color=_TEXT_WHITE,
+                    border_color=_ACCENT,
                 )
             elif i < step:
+                # Completed: transparent, light green text
                 btn.configure(
                     fg_color="transparent",
-                    text_color=(_COLOR_SUCCESS, _COLOR_SUCCESS),
-                    border_color=(_COLOR_SUCCESS, _COLOR_SUCCESS),
+                    hover_color="#004080",
+                    text_color=_COLOR_SUCCESS,
+                    border_color=_COLOR_SUCCESS,
                 )
             else:
+                # Future: muted
                 btn.configure(
                     fg_color="transparent",
-                    text_color=("gray60", "gray50"),
-                    border_color=("gray70", "gray40"),
+                    hover_color="#004080",
+                    text_color="#99AABB",
+                    border_color="#335577",
                 )
 
 
@@ -151,7 +220,7 @@ class Screen1(ctk.CTkFrame):
     """File loading, data preview, and ML auto-classification."""
 
     def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
         self._app = parent
         self._deals_path: Optional[Path] = None
         self._purchasers_path: Optional[Path] = None
@@ -173,37 +242,50 @@ class Screen1(ctk.CTkFrame):
         file_frame.grid_columnconfigure(1, weight=1)
 
         # Mode toggle: CSV or Excel
-        ctk.CTkLabel(file_frame, text="Format:", font=_FONT_BODY).grid(
+        ctk.CTkLabel(file_frame, text="Format:", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=0, column=0, sticky="w", padx=(0, 10))
         self._format_var = ctk.StringVar(value="csv")
         ctk.CTkSegmentedButton(
             file_frame, values=["CSV (2 files)", "Excel (1 file)"],
             variable=self._format_var,
             command=self._on_format_change, font=_FONT_SMALL,
+            selected_color=_BRAND, selected_hover_color="#004080",
+            unselected_color=_BG_SURFACE, unselected_hover_color="#E8ECF2",
+            text_color=_TEXT_WHITE, text_color_disabled=_TEXT_MUTED,
         ).grid(row=0, column=1, sticky="w")
 
         # Deals row
-        self._deals_lbl = ctk.CTkLabel(file_frame, text="Deals file:", font=_FONT_BODY)
+        self._deals_lbl = ctk.CTkLabel(file_frame, text="Deals file:",
+                                        font=_FONT_BODY, text_color=_TEXT_DARK)
         self._deals_lbl.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 4))
         self._deals_path_var = ctk.StringVar(value="No file selected")
         ctk.CTkLabel(file_frame, textvariable=self._deals_path_var,
-                     font=_FONT_SMALL, text_color=("gray50", "gray60")).grid(
+                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
             row=1, column=1, sticky="w")
-        ctk.CTkButton(file_frame, text="Browse", width=90, font=_FONT_SMALL,
-                      command=self._browse_deals).grid(row=1, column=2, padx=(10, 0))
+        ctk.CTkButton(
+            file_frame, text="Browse", width=90, font=_FONT_SMALL,
+            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
+            command=self._browse_deals,
+        ).grid(row=1, column=2, padx=(10, 0))
 
         # Purchasers row (CSV only)
-        self._purch_lbl = ctk.CTkLabel(file_frame, text="Purchasers file:", font=_FONT_BODY)
+        self._purch_lbl = ctk.CTkLabel(file_frame, text="Purchasers file:",
+                                        font=_FONT_BODY, text_color=_TEXT_DARK)
         self._purch_lbl.grid(row=2, column=0, sticky="w", padx=(0, 10), pady=4)
         self._purch_path_var = ctk.StringVar(value="No file selected")
         ctk.CTkLabel(file_frame, textvariable=self._purch_path_var,
-                     font=_FONT_SMALL, text_color=("gray50", "gray60")).grid(
+                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
             row=2, column=1, sticky="w")
-        ctk.CTkButton(file_frame, text="Browse", width=90, font=_FONT_SMALL,
-                      command=self._browse_purchasers).grid(row=2, column=2, padx=(10, 0))
+        ctk.CTkButton(
+            file_frame, text="Browse", width=90, font=_FONT_SMALL,
+            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
+            command=self._browse_purchasers,
+        ).grid(row=2, column=2, padx=(10, 0))
 
         ctk.CTkButton(
             file_frame, text="Load & Preview", font=_FONT_BODY,
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
             command=self._load_files,
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
 
@@ -226,7 +308,7 @@ class Screen1(ctk.CTkFrame):
         self._preview_placeholder = ctk.CTkLabel(
             self._preview_frame,
             text="Load a file to see a preview.",
-            font=_FONT_SMALL, text_color=("gray55", "gray55"),
+            font=_FONT_SMALL, text_color=_TEXT_MUTED,
         )
         self._preview_placeholder.grid(row=0, column=0, pady=30)
 
@@ -238,20 +320,24 @@ class Screen1(ctk.CTkFrame):
         self._ml_btn = ctk.CTkButton(
             ml_frame, text="Auto-classify Deals with ML",
             font=_FONT_BODY, state="disabled",
+            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
             command=self._run_ml,
         )
         self._ml_btn.grid(row=0, column=0, padx=(0, 16))
 
         self._ml_status_var = ctk.StringVar(value="")
         ctk.CTkLabel(ml_frame, textvariable=self._ml_status_var,
-                     font=_FONT_SMALL, anchor="w").grid(row=0, column=1, sticky="w")
+                     font=_FONT_SMALL, anchor="w",
+                     text_color=_TEXT_DARK).grid(row=0, column=1, sticky="w")
 
         # ---- Navigation ----
         nav = ctk.CTkFrame(self, fg_color="transparent")
         nav.grid(row=8, column=0, sticky="e", padx=20, pady=20)
         self._next_btn = ctk.CTkButton(
             nav, text="Next: Configure  →", font=_FONT_BODY,
-            state="disabled", command=self._go_next,
+            state="disabled",
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
+            command=self._go_next,
         )
         self._next_btn.grid(row=0, column=0)
 
@@ -259,8 +345,7 @@ class Screen1(ctk.CTkFrame):
 
     def _on_format_change(self, value: str):
         is_csv = value == "CSV (2 files)"
-        state = "normal" if is_csv else "disabled"
-        self._purch_lbl.configure(text_color=("gray10", "gray90") if is_csv else ("gray60", "gray50"))
+        self._purch_lbl.configure(text_color=_TEXT_DARK if is_csv else _TEXT_MUTED)
 
     def _browse_deals(self):
         fmt = self._format_var.get()
@@ -314,23 +399,23 @@ class Screen1(ctk.CTkFrame):
 
         # Deals preview
         ctk.CTkLabel(self._preview_frame, text=f"Deals ({len(self._deals_df)} rows)",
-                     font=_FONT_SMALL, text_color=_COLOR_NEUTRAL).grid(
+                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
             row=0, column=0, sticky="w", pady=(0, 4))
         _ScrollableTable(
             self._preview_frame,
             df=self._deals_df.head(20),
-            height=160,
+            fg_color=_BG_SURFACE, height=160,
         ).grid(row=1, column=0, sticky="ew", pady=(0, 12))
 
         # Purchasers preview
         ctk.CTkLabel(self._preview_frame,
                      text=f"Purchasers ({len(self._purchasers_df)} rows)",
-                     font=_FONT_SMALL, text_color=_COLOR_NEUTRAL).grid(
+                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
             row=2, column=0, sticky="w", pady=(0, 4))
         _ScrollableTable(
             self._preview_frame,
             df=self._purchasers_df,
-            height=160,
+            fg_color=_BG_SURFACE, height=160,
         ).grid(row=3, column=0, sticky="ew")
 
         self._preview_frame.grid_columnconfigure(0, weight=1)
@@ -398,7 +483,7 @@ class Screen2(ctk.CTkFrame):
     """Solver configuration and run screen with live log output."""
 
     def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
         self._app = parent
         self._build()
 
@@ -415,40 +500,51 @@ class Screen2(ctk.CTkFrame):
         params.grid_columnconfigure(1, weight=1)
 
         # Time limit
-        ctk.CTkLabel(params, text="Time limit (seconds):", font=_FONT_BODY).grid(
+        ctk.CTkLabel(params, text="Time limit (seconds):", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=0, column=0, sticky="w", padx=(0, 16), pady=8)
         self._time_var = ctk.IntVar(value=60)
-        self._time_display = ctk.CTkLabel(params, text="60 s", font=_FONT_BODY, width=50)
+        self._time_display = ctk.CTkLabel(params, text="60 s", font=_FONT_BODY,
+                                           text_color=_BRAND, width=50)
         self._time_display.grid(row=0, column=2, padx=(8, 0))
         ctk.CTkSlider(
             params, from_=10, to=300, number_of_steps=29,
             variable=self._time_var,
+            button_color=_ACCENT, button_hover_color="#B5851E",
+            progress_color=_BRAND,
             command=lambda v: self._time_display.configure(text=f"{int(v)} s"),
         ).grid(row=0, column=1, sticky="ew")
 
         # Min deal toggle
-        ctk.CTkLabel(params, text="Each purchaser gets at least 1 deal:", font=_FONT_BODY).grid(
+        ctk.CTkLabel(params, text="Each purchaser gets at least 1 deal:", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=1, column=0, sticky="w", padx=(0, 16), pady=8)
         self._min_deal_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(params, text="", variable=self._min_deal_var).grid(
-            row=1, column=1, sticky="w")
+        ctk.CTkSwitch(params, text="", variable=self._min_deal_var,
+                      progress_color=_BRAND, button_color=_ACCENT,
+                      button_hover_color="#B5851E").grid(row=1, column=1, sticky="w")
 
         # Pref penalty toggle
-        ctk.CTkLabel(params, text="Penalise preference mismatches:", font=_FONT_BODY).grid(
+        ctk.CTkLabel(params, text="Penalise preference mismatches:", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=2, column=0, sticky="w", padx=(0, 16), pady=8)
         self._pref_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(params, text="", variable=self._pref_var).grid(
-            row=2, column=1, sticky="w")
+        ctk.CTkSwitch(params, text="", variable=self._pref_var,
+                      progress_color=_BRAND, button_color=_ACCENT,
+                      button_hover_color="#B5851E").grid(row=2, column=1, sticky="w")
 
         # ---- Run button ----
         run_row = ctk.CTkFrame(self, fg_color="transparent")
         run_row.grid(row=3, column=0, sticky="w", padx=20, pady=(20, 8))
         self._run_btn = ctk.CTkButton(
             run_row, text="Run Optimisation", font=_FONT_HEADING,
-            width=200, height=44, command=self._run,
+            width=200, height=44,
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
+            command=self._run,
         )
         self._run_btn.grid(row=0, column=0)
-        self._spinner_lbl = ctk.CTkLabel(run_row, text="", font=_FONT_SMALL, width=200)
+        self._spinner_lbl = ctk.CTkLabel(run_row, text="", font=_FONT_SMALL,
+                                          text_color=_TEXT_DARK, width=200)
         self._spinner_lbl.grid(row=0, column=1, padx=16)
 
         # ---- Log ----
@@ -456,7 +552,11 @@ class Screen2(ctk.CTkFrame):
             row=4, column=0, sticky="w", padx=20, pady=(16, 4))
         _Divider(self).grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 8))
 
-        self._log = ctk.CTkTextbox(self, font=_FONT_MONO, state="disabled", height=240)
+        self._log = ctk.CTkTextbox(
+            self, font=_FONT_MONO, state="disabled", height=240,
+            fg_color=_BG_SURFACE, text_color=_TEXT_DARK,
+            border_color="#D0D8E4", border_width=1,
+        )
         self._log.grid(row=6, column=0, sticky="nsew", padx=20)
         self.grid_rowconfigure(6, weight=1)
 
@@ -464,12 +564,18 @@ class Screen2(ctk.CTkFrame):
         nav = ctk.CTkFrame(self, fg_color="transparent")
         nav.grid(row=7, column=0, sticky="ew", padx=20, pady=20)
         nav.grid_columnconfigure(1, weight=1)
-        ctk.CTkButton(nav, text="← Back", font=_FONT_BODY,
-                      fg_color="transparent", border_width=1,
-                      command=lambda: self._app.go_to(0)).grid(row=0, column=0)
+        ctk.CTkButton(
+            nav, text="← Back", font=_FONT_BODY,
+            fg_color="transparent", border_width=1,
+            border_color=_BRAND, text_color=_BRAND,
+            hover_color="#E8ECF2",
+            command=lambda: self._app.go_to(0),
+        ).grid(row=0, column=0)
         self._next_btn = ctk.CTkButton(
             nav, text="View Results  →", font=_FONT_BODY,
-            state="disabled", command=lambda: self._app.go_to(2),
+            state="disabled",
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
+            command=lambda: self._app.go_to(2),
         )
         self._next_btn.grid(row=0, column=2)
 
@@ -534,7 +640,7 @@ class Screen3(ctk.CTkFrame):
     """Results table, metrics, What-If analysis, and export."""
 
     def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
         self._app = parent
         self._sensitivity: Optional[SensitivityModel] = None
         self._build()
@@ -575,44 +681,62 @@ class Screen3(ctk.CTkFrame):
         action_bar.grid(row=9, column=0, sticky="ew", padx=20, pady=20)
         action_bar.grid_columnconfigure(2, weight=1)
 
-        ctk.CTkButton(action_bar, text="← Back", font=_FONT_BODY,
-                      fg_color="transparent", border_width=1,
-                      command=lambda: self._app.go_to(1)).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(action_bar, text="Export CSV", font=_FONT_BODY,
-                      command=self._export_csv).grid(row=0, column=1, padx=(0, 8))
-        ctk.CTkButton(action_bar, text="Export Excel", font=_FONT_BODY,
-                      command=self._export_excel).grid(row=0, column=2, sticky="w")
+        ctk.CTkButton(
+            action_bar, text="← Back", font=_FONT_BODY,
+            fg_color="transparent", border_width=1,
+            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
+            command=lambda: self._app.go_to(1),
+        ).grid(row=0, column=0, padx=(0, 8))
+        ctk.CTkButton(
+            action_bar, text="Export CSV", font=_FONT_BODY,
+            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
+            command=self._export_csv,
+        ).grid(row=0, column=1, padx=(0, 8))
+        ctk.CTkButton(
+            action_bar, text="Export Excel", font=_FONT_BODY,
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
+            command=self._export_excel,
+        ).grid(row=0, column=2, sticky="w")
         ctk.CTkButton(
             action_bar, text="Run Again with New Data", font=_FONT_BODY,
             fg_color="transparent", border_width=1,
+            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
             command=self._run_again,
         ).grid(row=0, column=3, sticky="e")
 
     def _build_whatif(self):
         f = self._whatif_frame
 
-        ctk.CTkLabel(f, text="Purchaser:", font=_FONT_BODY).grid(
+        ctk.CTkLabel(f, text="Purchaser:", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=0, column=0, sticky="w", padx=(0, 8), pady=6)
         self._wi_purchaser_var = ctk.StringVar()
         self._wi_dropdown = ctk.CTkOptionMenu(
             f, variable=self._wi_purchaser_var,
             values=["(load results first)"], width=220, font=_FONT_SMALL,
+            fg_color=_BRAND, button_color="#004080", button_hover_color="#005599",
+            text_color=_TEXT_WHITE,
         )
         self._wi_dropdown.grid(row=0, column=1, padx=(0, 20), pady=6)
 
-        ctk.CTkLabel(f, text="Budget change:", font=_FONT_BODY).grid(
+        ctk.CTkLabel(f, text="Budget change:", font=_FONT_BODY,
+                     text_color=_TEXT_DARK).grid(
             row=0, column=2, sticky="w", padx=(0, 8))
         self._wi_pct_var = ctk.DoubleVar(value=0.10)
-        self._wi_pct_display = ctk.CTkLabel(f, text="+10%", font=_FONT_BODY, width=50)
+        self._wi_pct_display = ctk.CTkLabel(f, text="+10%", font=_FONT_BODY,
+                                             text_color=_ACCENT, width=50)
         self._wi_pct_display.grid(row=0, column=4, padx=(8, 0))
         ctk.CTkSlider(
             f, from_=-0.30, to=0.30, number_of_steps=12,
             variable=self._wi_pct_var, width=200,
+            button_color=_ACCENT, button_hover_color="#B5851E",
+            progress_color=_BRAND,
             command=self._on_wi_slider,
         ).grid(row=0, column=3)
 
         self._wi_analyse_btn = ctk.CTkButton(
             f, text="Analyse", font=_FONT_BODY, width=100,
+            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
             command=self._run_whatif, state="disabled",
         )
         self._wi_analyse_btn.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
@@ -620,6 +744,7 @@ class Screen3(ctk.CTkFrame):
         self._wi_exact_btn = ctk.CTkButton(
             f, text="Run Exact", font=_FONT_BODY, width=100,
             fg_color="transparent", border_width=1,
+            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
             command=self._run_whatif_exact, state="disabled",
         )
         self._wi_exact_btn.grid(row=1, column=2, sticky="w", pady=(8, 0))
@@ -628,6 +753,7 @@ class Screen3(ctk.CTkFrame):
         ctk.CTkLabel(
             f, textvariable=self._wi_result_var,
             font=_FONT_SMALL, wraplength=700, justify="left",
+            text_color=_TEXT_DARK,
         ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
 
     def _on_wi_slider(self, val):
@@ -665,11 +791,13 @@ class Screen3(ctk.CTkFrame):
         ]
 
         for col, (label, value, color) in enumerate(metrics):
-            card = ctk.CTkFrame(self._metrics_frame, corner_radius=8)
+            card = ctk.CTkFrame(self._metrics_frame, corner_radius=8,
+                                fg_color=_BG_SURFACE,
+                                border_width=1, border_color="#D0D8E4")
             card.grid(row=0, column=col, padx=(0, 12), pady=4, sticky="nsew")
             self._metrics_frame.grid_columnconfigure(col, weight=1)
             ctk.CTkLabel(card, text=label, font=_FONT_SMALL,
-                         text_color=("gray55", "gray55")).pack(padx=16, pady=(10, 2))
+                         text_color=_TEXT_MUTED).pack(padx=16, pady=(10, 2))
             ctk.CTkLabel(card, text=value, font=_FONT_HEADING,
                          text_color=color).pack(padx=16, pady=(0, 10))
 
@@ -693,7 +821,8 @@ class Screen3(ctk.CTkFrame):
         df = pd.DataFrame(rows)
         _ScrollableTable(
             self._table_frame, df=df,
-            highlight_col="Assigned To", height=220,
+            highlight_col="Assigned To",
+            fg_color=_BG_SURFACE, height=220,
         ).grid(row=0, column=0, sticky="ew")
         self._table_frame.grid_columnconfigure(0, weight=1)
 
@@ -839,6 +968,17 @@ class App(ctk.CTk):
         self.title("AllocationModel")
         self.geometry("960x780")
         self.minsize(860, 660)
+        self.configure(fg_color=_BG_PAGE)
+
+        # Load custom fonts as soon as we have a Tk root
+        _load_fonts(self)
+
+        # Refresh module-level font tuples to use loaded families
+        global _FONT_TITLE, _FONT_HEADING, _FONT_BODY, _FONT_SMALL
+        _FONT_TITLE   = _font_title()
+        _FONT_HEADING = _font_heading()
+        _FONT_BODY    = _font_body()
+        _FONT_SMALL   = _font_small()
 
         # Window icon (best-effort — silently skipped if file is missing)
         try:
