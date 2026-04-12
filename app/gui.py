@@ -15,8 +15,6 @@ remains responsive during long solves.
 
 from __future__ import annotations
 
-import os
-import sys
 import threading
 import tkinter as tk
 import tkinter.filedialog as fd
@@ -24,9 +22,8 @@ import tkinter.messagebox as mb
 from pathlib import Path
 from typing import Optional
 
-# Resolve project root so icon can be found regardless of working directory
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_ICON_PATH = _PROJECT_ROOT / "assets" / "icon.png"
+_ICON_PATH    = _PROJECT_ROOT / "assets" / "icon.png"
 
 import customtkinter as ctk
 import pandas as pd
@@ -39,544 +36,562 @@ from app.sensitivity import compute_sensitivity, what_if, SensitivityModel
 from app.exporter import export_csv, export_excel
 
 # ---------------------------------------------------------------------------
-# Theme — light, brand-driven palette
+# Theme
 # ---------------------------------------------------------------------------
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
-# Brand palette
-_BG_PAGE    = "#F4F6F9"   # page / screen background
-_BG_SURFACE = "#FFFFFF"   # cards, tables, log box
-_BG_NAV     = "#003366"   # step bar, top nav strip
-_BRAND      = "#003366"   # section headers, borders, labels
-_ACCENT     = "#C8982A"   # CTAs, active step, dividers, primary buttons
-_TEXT_DARK  = "#1A2033"   # primary body text on light bg
-_TEXT_MUTED = "#6B7280"   # secondary / hint text
-_TEXT_WHITE = "#FFFFFF"   # text on dark surfaces
+# Palette
+_PAGE    = "#F4F6F9"
+_SURFACE = "#FFFFFF"
+_BRAND   = "#003366"
+_ACCENT  = "#C8982A"
+_BORDER  = "#D5DCE8"
+_TXT     = "#1A2033"
+_MUTED   = "#6B7280"
+_WHITE   = "#FFFFFF"
 
-_COLOR_SUCCESS = "#1A7A4A"
-_COLOR_WARNING = _ACCENT
-_COLOR_ERROR   = "#C0392B"
-_COLOR_NEUTRAL = _TEXT_MUTED
-_COLOR_UNALLOC = _COLOR_ERROR
+_OK      = "#1A7A4A"
+_WARN    = _ACCENT
+_ERR     = "#C0392B"
+_UNALLOC = _ERR
 
-_STEP_LABELS = ["  1  Load Data  ", "  2  Configure  ", "  3  Results  "]
+_STEP_LABELS = ["1  Load Data", "2  Configure", "3  Results"]
 
-# Font paths (assets/fonts/ relative to project root)
-_FONTS_DIR = _PROJECT_ROOT / "assets" / "fonts"
-_FONT_FILE_DISPLAY = _FONTS_DIR / "FrauncesSemiBold.ttf"
-_FONT_FILE_BODY    = _FONTS_DIR / "PlusJakartaSansVariable.ttf"
-
-# Family names as registered by tkextrafont
+# Font paths
+_FONTS_DIR       = _PROJECT_ROOT / "assets" / "fonts"
+_FONT_FRAUNCES   = _FONTS_DIR / "FrauncesSemiBold.ttf"
+_FONT_JAKARTA    = _FONTS_DIR / "PlusJakartaSansVariable.ttf"
 _FF_DISPLAY = "Fraunces"
 _FF_BODY    = "Plus Jakarta Sans"
 
-# Will be populated by _load_fonts() once a Tk root exists
 _FONTS_LOADED = False
 
 
 def _load_fonts(root) -> None:
-    """Register custom fonts with Tk. Safe to call multiple times."""
     global _FONTS_LOADED
     if _FONTS_LOADED:
         return
     try:
-        if _FONT_FILE_DISPLAY.exists():
-            ExtraFont(file=str(_FONT_FILE_DISPLAY), family=_FF_DISPLAY, root=root)
-        if _FONT_FILE_BODY.exists():
-            ExtraFont(file=str(_FONT_FILE_BODY), family=_FF_BODY, root=root)
+        if _FONT_FRAUNCES.exists():
+            ExtraFont(file=str(_FONT_FRAUNCES), family=_FF_DISPLAY, root=root)
+        if _FONT_JAKARTA.exists():
+            ExtraFont(file=str(_FONT_JAKARTA),  family=_FF_BODY,    root=root)
         _FONTS_LOADED = True
     except Exception:
-        pass  # Fall back to system fonts silently
+        pass
 
 
-def _ff(display: bool = False) -> str:
-    """Return the correct font family string, with system fallback."""
-    if display:
-        return _FF_DISPLAY if _FONTS_LOADED else "Georgia"
+def _fd(bold: bool = False) -> str:
+    """Display font family (Fraunces or fallback)."""
+    return _FF_DISPLAY if _FONTS_LOADED else "Georgia"
+
+
+def _fb() -> str:
+    """Body font family (Plus Jakarta Sans or fallback)."""
     return _FF_BODY if _FONTS_LOADED else "Segoe UI"
 
 
-# Font tuples — defined as functions so they pick up the loaded families
-def _font_title()   -> tuple: return (_ff(True),  20, "bold")
-def _font_heading() -> tuple: return (_ff(True),  14, "bold")
-def _font_body()    -> tuple: return (_ff(False), 13)
-def _font_small()   -> tuple: return (_ff(False), 11)
-def _font_mono()    -> tuple: return ("Courier New", 11)
-
-# Convenience aliases used throughout (evaluated after _load_fonts is called)
-_FONT_TITLE   = ("Georgia",    20, "bold")   # overwritten at App.__init__
-_FONT_HEADING = ("Georgia",    14, "bold")
-_FONT_BODY    = ("Segoe UI",   13)
-_FONT_SMALL   = ("Segoe UI",   11)
-_FONT_MONO    = ("Courier New",11)
+# Font tuples — functions so they resolve after _load_fonts()
+def F_TITLE()   -> tuple: return (_fd(), 22, "bold")
+def F_H1()      -> tuple: return (_fd(), 16, "bold")
+def F_H2()      -> tuple: return (_fd(), 13, "bold")
+def F_BODY()    -> tuple: return (_fb(), 13)
+def F_SMALL()   -> tuple: return (_fb(), 11)
+def F_MONO()    -> tuple: return ("Courier New", 11)
+def F_METRIC()  -> tuple: return (_fd(), 18, "bold")
 
 
 # ---------------------------------------------------------------------------
-# Reusable widgets
+# Shared widget helpers
 # ---------------------------------------------------------------------------
 
-class _SectionLabel(ctk.CTkLabel):
-    def __init__(self, parent, text: str, **kwargs):
-        super().__init__(
-            parent, text=text, font=_FONT_HEADING,
-            anchor="w", text_color=_BRAND, **kwargs,
-        )
+def _card(parent, **kw) -> ctk.CTkFrame:
+    """White surface card with brand border."""
+    return ctk.CTkFrame(parent, fg_color=_SURFACE, corner_radius=10,
+                        border_width=1, border_color=_BORDER, **kw)
 
 
-class _Divider(ctk.CTkFrame):
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, height=2, fg_color=_ACCENT, **kwargs)
+def _section(parent, text: str) -> None:
+    """Render a labelled section header + accent divider into parent (pack layout)."""
+    ctk.CTkLabel(parent, text=text, font=F_H1(), text_color=_BRAND, anchor="w").pack(
+        fill="x", padx=0, pady=(0, 6))
+    ctk.CTkFrame(parent, height=2, fg_color=_ACCENT, corner_radius=1).pack(
+        fill="x", pady=(0, 14))
 
 
-class _ScrollableTable(ctk.CTkScrollableFrame):
-    """Simple read-only table built from a pandas DataFrame."""
+def _section_g(parent, text: str, ncols: int = 4) -> None:
+    """Section header for grid-layout parents (placed at rows 0–1, spanning ncols)."""
+    ctk.CTkLabel(parent, text=text, font=F_H1(), text_color=_BRAND, anchor="w"
+                 ).grid(row=0, column=0, columnspan=ncols, sticky="ew", pady=(0, 6))
+    ctk.CTkFrame(parent, height=2, fg_color=_ACCENT, corner_radius=1
+                 ).grid(row=1, column=0, columnspan=ncols, sticky="ew", pady=(0, 14))
 
-    def __init__(self, parent, df: pd.DataFrame, highlight_col: Optional[str] = None, **kwargs):
-        super().__init__(parent, **kwargs)
-        self._render(df, highlight_col)
 
-    def _render(self, df: pd.DataFrame, highlight_col: Optional[str]):
-        # Header row — brand background, white text
-        for col_idx, col in enumerate(df.columns):
-            ctk.CTkLabel(
-                self, text=str(col), font=_FONT_BODY,
-                fg_color=_BRAND, text_color=_TEXT_WHITE,
-                corner_radius=4, padx=8, pady=4, anchor="w",
-            ).grid(row=0, column=col_idx, sticky="ew", padx=2, pady=2)
+def _btn_primary(parent, text: str, command, width: int = 140, **kw) -> ctk.CTkButton:
+    return ctk.CTkButton(parent, text=text, font=F_BODY(),
+                         fg_color=_ACCENT, hover_color="#b5841e",
+                         text_color=_WHITE, corner_radius=8,
+                         width=width, command=command, **kw)
 
-        # Data rows
-        for row_idx, row in df.iterrows():
-            row_bg = _BG_SURFACE if row_idx % 2 == 0 else "#EEF1F6"
-            for col_idx, col in enumerate(df.columns):
-                val  = row[col]
-                is_unalloc = highlight_col and col == highlight_col and str(val) == "Unallocated"
-                text_color = _COLOR_UNALLOC if is_unalloc else _TEXT_DARK
-                ctk.CTkLabel(
-                    self, text=str(val), font=_FONT_SMALL,
-                    text_color=text_color, fg_color=row_bg,
-                    anchor="w", padx=8,
-                ).grid(row=row_idx + 1, column=col_idx, sticky="ew", padx=2, pady=1)
 
-        for col_idx in range(len(df.columns)):
-            self.grid_columnconfigure(col_idx, weight=1)
+def _btn_secondary(parent, text: str, command, width: int = 140, **kw) -> ctk.CTkButton:
+    return ctk.CTkButton(parent, text=text, font=F_BODY(),
+                         fg_color=_BRAND, hover_color="#004a99",
+                         text_color=_WHITE, corner_radius=8,
+                         width=width, command=command, **kw)
 
+
+def _btn_ghost(parent, text: str, command, width: int = 140, **kw) -> ctk.CTkButton:
+    return ctk.CTkButton(parent, text=text, font=F_BODY(),
+                         fg_color="transparent", hover_color="#e8ecf4",
+                         text_color=_BRAND, border_width=1, border_color=_BRAND,
+                         corner_radius=8, width=width, command=command, **kw)
+
+
+def _lbl(parent, text: str, muted: bool = False, **kw) -> ctk.CTkLabel:
+    color = _MUTED if muted else _TXT
+    return ctk.CTkLabel(parent, text=text, font=F_BODY(),
+                        text_color=color, anchor="w", **kw)
+
+
+def _small(parent, text: str | None = None, var: ctk.StringVar | None = None,
+           color: str = _MUTED, **kw) -> ctk.CTkLabel:
+    kw2 = dict(font=F_SMALL(), text_color=color, anchor="w", **kw)
+    if var is not None:
+        return ctk.CTkLabel(parent, textvariable=var, **kw2)
+    return ctk.CTkLabel(parent, text=text or "", **kw2)
+
+
+# ---------------------------------------------------------------------------
+# Step bar
+# ---------------------------------------------------------------------------
 
 class _StepBar(ctk.CTkFrame):
-    """Top navigation bar showing the 3 wizard steps on a brand-color strip."""
+    def __init__(self, parent, **kw):
+        super().__init__(parent, fg_color=_BRAND, corner_radius=0, **kw)
+        self._btns: list[ctk.CTkButton] = []
+        self.grid_columnconfigure(0, weight=1)
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, fg_color=_BG_NAV, corner_radius=8, **kwargs)
-        self._buttons: list[ctk.CTkButton] = []
+        inner = ctk.CTkFrame(self, fg_color="transparent")
+        inner.pack(side="left", padx=24, pady=0)
+
         for i, label in enumerate(_STEP_LABELS):
+            sep_w = ctk.CTkLabel(inner, text=" › ", font=F_SMALL(),
+                                 text_color="#6688aa")
+            if i > 0:
+                sep_w.grid(row=0, column=i * 2 - 1, padx=2)
+
             btn = ctk.CTkButton(
-                self, text=label, font=_FONT_SMALL,
-                state="disabled",
-                fg_color="transparent",
-                hover_color="#004080",
-                border_width=1,
-                border_color="#335577",
-                corner_radius=6,
-                text_color="#99AABB",
+                inner, text=label, font=F_SMALL(),
+                state="disabled", fg_color="transparent",
+                hover_color="#004a99", border_width=0, corner_radius=6,
+                text_color="#7799bb", width=110, height=32,
             )
-            btn.grid(row=0, column=i, padx=8, pady=8)
-            self._buttons.append(btn)
-        self.grid_columnconfigure((0, 1, 2), weight=1)
+            btn.grid(row=0, column=i * 2, padx=4, pady=8)
+            self._btns.append(btn)
 
     def set_active(self, step: int):
-        """Highlight the active step (0-indexed)."""
-        for i, btn in enumerate(self._buttons):
+        for i, btn in enumerate(self._btns):
             if i == step:
-                # Active: accent fill, white text
-                btn.configure(
-                    fg_color=_ACCENT,
-                    hover_color="#B5851E",
-                    text_color=_TEXT_WHITE,
-                    border_color=_ACCENT,
-                )
+                btn.configure(fg_color=_ACCENT, text_color=_WHITE,
+                               hover_color="#b5841e")
             elif i < step:
-                # Completed: transparent, light green text
-                btn.configure(
-                    fg_color="transparent",
-                    hover_color="#004080",
-                    text_color=_COLOR_SUCCESS,
-                    border_color=_COLOR_SUCCESS,
-                )
+                btn.configure(fg_color="transparent", text_color="#66cc88",
+                               hover_color="#004a99")
             else:
-                # Future: muted
-                btn.configure(
-                    fg_color="transparent",
-                    hover_color="#004080",
-                    text_color="#99AABB",
-                    border_color="#335577",
-                )
+                btn.configure(fg_color="transparent", text_color="#7799bb",
+                               hover_color="#004a99")
+
+
+# ---------------------------------------------------------------------------
+# Scrollable table
+# ---------------------------------------------------------------------------
+
+class _Table(ctk.CTkScrollableFrame):
+    def __init__(self, parent, df: pd.DataFrame,
+                 highlight_col: Optional[str] = None, **kw):
+        super().__init__(parent, fg_color=_SURFACE, **kw)
+        self._draw(df, highlight_col)
+
+    def _draw(self, df: pd.DataFrame, highlight_col: Optional[str]):
+        for c, col in enumerate(df.columns):
+            ctk.CTkLabel(self, text=str(col), font=F_SMALL(),
+                         fg_color=_BRAND, text_color=_WHITE,
+                         corner_radius=4, padx=10, pady=5, anchor="w",
+                         ).grid(row=0, column=c, sticky="ew", padx=2, pady=(0, 2))
+        for r, (_, row) in enumerate(df.iterrows()):
+            bg = _SURFACE if r % 2 == 0 else "#f0f4fa"
+            for c, col in enumerate(df.columns):
+                val = row[col]
+                unalloc = (highlight_col == col and str(val) == "Unallocated")
+                ctk.CTkLabel(self, text=str(val), font=F_SMALL(),
+                             fg_color=bg, text_color=_UNALLOC if unalloc else _TXT,
+                             anchor="w", padx=10,
+                             ).grid(row=r + 1, column=c, sticky="ew", padx=2, pady=1)
+        for c in range(len(df.columns)):
+            self.grid_columnconfigure(c, weight=1)
 
 
 # ---------------------------------------------------------------------------
 # Screen 1 — Load Data
 # ---------------------------------------------------------------------------
 
-class Screen1(ctk.CTkFrame):
-    """File loading, data preview, and ML auto-classification."""
-
-    def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
+class Screen1(ctk.CTkScrollableFrame):
+    def __init__(self, parent: "App", **kw):
+        super().__init__(parent, fg_color=_PAGE, **kw)
         self._app = parent
         self._deals_path: Optional[Path] = None
-        self._purchasers_path: Optional[Path] = None
-        self._deals_df: Optional[pd.DataFrame] = None
-        self._purchasers_df: Optional[pd.DataFrame] = None
+        self._purch_path: Optional[Path] = None
+        self._deals_df:   Optional[pd.DataFrame] = None
+        self._purch_df:   Optional[pd.DataFrame] = None
         self._ml_summary: Optional[ClassificationSummary] = None
+        self.grid_columnconfigure(0, weight=1)
         self._build()
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
+        # ---- Screen title ----
+        ctk.CTkLabel(self, text="Load Input Data", font=F_TITLE(),
+                     text_color=_BRAND, anchor="w",
+                     ).grid(row=0, column=0, sticky="w", padx=28, pady=(24, 18))
 
-        # ---- File section ----
-        _SectionLabel(self, text="Load Input Files").grid(
-            row=0, column=0, sticky="w", padx=20, pady=(20, 4))
-        _Divider(self).grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 12))
+        # ---- File card ----
+        fc = _card(self)
+        fc.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        fc.grid_columnconfigure(0, weight=1)
+        fp = ctk.CTkFrame(fc, fg_color="transparent")
+        fp.pack(fill="x", padx=20, pady=20)
+        fp.grid_columnconfigure(1, weight=1)
 
-        file_frame = ctk.CTkFrame(self, fg_color="transparent")
-        file_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=4)
-        file_frame.grid_columnconfigure(1, weight=1)
+        _section_g(fp, "Input Files", ncols=3)
 
-        # Mode toggle: CSV or Excel
-        ctk.CTkLabel(file_frame, text="Format:", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=0, column=0, sticky="w", padx=(0, 10))
-        self._format_var = ctk.StringVar(value="csv")
-        ctk.CTkSegmentedButton(
-            file_frame, values=["CSV (2 files)", "Excel (1 file)"],
-            variable=self._format_var,
-            command=self._on_format_change, font=_FONT_SMALL,
-            selected_color=_BRAND, selected_hover_color="#004080",
-            unselected_color=_BG_SURFACE, unselected_hover_color="#E8ECF2",
-            text_color=_TEXT_WHITE, text_color_disabled=_TEXT_MUTED,
-        ).grid(row=0, column=1, sticky="w")
+        # Format toggle
+        _lbl(fp, "File format:").grid(row=2, column=0, sticky="w", pady=6)
+        self._fmt_var = ctk.StringVar(value="CSV (2 files)")
+        seg = ctk.CTkSegmentedButton(
+            fp, values=["CSV (2 files)", "Excel (1 file)"],
+            variable=self._fmt_var,
+            command=self._on_fmt_change,
+            font=F_SMALL(),
+            selected_color=_BRAND,
+            selected_hover_color="#004a99",
+            unselected_color="#d5dce8",
+            unselected_hover_color="#c2ccdc",
+            text_color=_WHITE,               # selected: white on brand ✓
+            text_color_disabled=_MUTED,
+        )
+        # CTk SegmentedButton: text_color applies to selected; unselected needs
+        # to be handled via a fixed fg override — override unselected text after build
+        seg.grid(row=2, column=1, sticky="w", padx=(12, 0), pady=6)
+        # Patch: unselected buttons use _TXT (dark) since bg is light grey
+        self._seg = seg
+        self._patch_seg_text()
 
-        # Deals row
-        self._deals_lbl = ctk.CTkLabel(file_frame, text="Deals file:",
-                                        font=_FONT_BODY, text_color=_TEXT_DARK)
-        self._deals_lbl.grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 4))
-        self._deals_path_var = ctk.StringVar(value="No file selected")
-        ctk.CTkLabel(file_frame, textvariable=self._deals_path_var,
-                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
-            row=1, column=1, sticky="w")
-        ctk.CTkButton(
-            file_frame, text="Browse", width=90, font=_FONT_SMALL,
-            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
-            command=self._browse_deals,
-        ).grid(row=1, column=2, padx=(10, 0))
+        # Deals file
+        self._deals_lbl = _lbl(fp, "Deals file:")
+        self._deals_lbl.grid(row=3, column=0, sticky="w", pady=(10, 4))
+        self._deals_var = ctk.StringVar(value="No file selected")
+        _small(fp, var=self._deals_var).grid(row=3, column=1, sticky="w", padx=(12, 0))
+        _btn_secondary(fp, "Browse", self._browse_deals, width=90
+                       ).grid(row=3, column=2, padx=(12, 0))
 
-        # Purchasers row (CSV only)
-        self._purch_lbl = ctk.CTkLabel(file_frame, text="Purchasers file:",
-                                        font=_FONT_BODY, text_color=_TEXT_DARK)
-        self._purch_lbl.grid(row=2, column=0, sticky="w", padx=(0, 10), pady=4)
-        self._purch_path_var = ctk.StringVar(value="No file selected")
-        ctk.CTkLabel(file_frame, textvariable=self._purch_path_var,
-                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
-            row=2, column=1, sticky="w")
-        ctk.CTkButton(
-            file_frame, text="Browse", width=90, font=_FONT_SMALL,
-            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
-            command=self._browse_purchasers,
-        ).grid(row=2, column=2, padx=(10, 0))
+        # Purchasers file
+        self._purch_lbl = _lbl(fp, "Purchasers file:")
+        self._purch_lbl.grid(row=4, column=0, sticky="w", pady=(6, 4))
+        self._purch_var = ctk.StringVar(value="No file selected")
+        _small(fp, var=self._purch_var).grid(row=4, column=1, sticky="w", padx=(12, 0))
+        self._purch_browse_btn = _btn_secondary(fp, "Browse", self._browse_purch, width=90)
+        self._purch_browse_btn.grid(row=4, column=2, padx=(12, 0))
 
-        ctk.CTkButton(
-            file_frame, text="Load & Preview", font=_FONT_BODY,
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=self._load_files,
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
-
-        # Status label
+        # Load button + status
+        load_row = ctk.CTkFrame(fp, fg_color="transparent")
+        load_row.grid(row=5, column=0, columnspan=3, sticky="w", pady=(16, 0))
+        _btn_primary(load_row, "Load & Preview", self._load, width=150).pack(side="left")
         self._status_var = ctk.StringVar(value="")
-        self._status_lbl = ctk.CTkLabel(self, textvariable=self._status_var,
-                                         font=_FONT_SMALL, anchor="w")
-        self._status_lbl.grid(row=3, column=0, sticky="w", padx=20, pady=(6, 0))
+        self._status_lbl = _small(load_row, var=self._status_var)
+        self._status_lbl.pack(side="left", padx=14)
 
-        # ---- Preview section ----
-        _SectionLabel(self, text="Data Preview").grid(
-            row=4, column=0, sticky="w", padx=20, pady=(20, 4))
-        _Divider(self).grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 8))
+        # ---- Preview card ----
+        pc = _card(self)
+        pc.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 16))
+        self._preview_outer = pc
 
-        self._preview_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._preview_frame.grid(row=6, column=0, sticky="nsew", padx=20)
-        self._preview_frame.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(6, weight=1)
+        self._preview_inner = ctk.CTkFrame(pc, fg_color="transparent")
+        self._preview_inner.pack(fill="both", expand=True, padx=20, pady=20)
+        self._preview_inner.grid_columnconfigure(0, weight=1)
 
-        self._preview_placeholder = ctk.CTkLabel(
-            self._preview_frame,
-            text="Load a file to see a preview.",
-            font=_FONT_SMALL, text_color=_TEXT_MUTED,
-        )
-        self._preview_placeholder.grid(row=0, column=0, pady=30)
+        _small(self._preview_inner,
+               text="Load a file above to preview your data.",
+               color=_MUTED).grid(row=0, column=0, pady=20)
 
-        # ---- ML section ----
-        ml_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ml_frame.grid(row=7, column=0, sticky="ew", padx=20, pady=(16, 0))
-        ml_frame.grid_columnconfigure(1, weight=1)
+        # ---- ML card ----
+        mc = _card(self)
+        mc.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 16))
+        mp = ctk.CTkFrame(mc, fg_color="transparent")
+        mp.pack(fill="x", padx=20, pady=20)
+        mp.grid_columnconfigure(1, weight=1)
 
-        self._ml_btn = ctk.CTkButton(
-            ml_frame, text="Auto-classify Deals with ML",
-            font=_FONT_BODY, state="disabled",
-            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
-            command=self._run_ml,
-        )
-        self._ml_btn.grid(row=0, column=0, padx=(0, 16))
+        _section_g(mp, "Auto-Classification (ML)", ncols=3)
 
-        self._ml_status_var = ctk.StringVar(value="")
-        ctk.CTkLabel(ml_frame, textvariable=self._ml_status_var,
-                     font=_FONT_SMALL, anchor="w",
-                     text_color=_TEXT_DARK).grid(row=0, column=1, sticky="w")
+        _small(mp, text=(
+            "K-Means clustering suggests Prepay / PPA labels from deal values. "
+            "Review overrides before proceeding."
+        ), color=_MUTED).grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
+        self._ml_btn = _btn_secondary(mp, "Auto-classify Deals", self._run_ml, width=170)
+        self._ml_btn.configure(state="disabled")
+        self._ml_btn.grid(row=3, column=0, sticky="w")
+
+        self._ml_var = ctk.StringVar(value="")
+        _small(mp, var=self._ml_var, color=_TXT).grid(
+            row=3, column=1, sticky="w", padx=(16, 0))
 
         # ---- Navigation ----
         nav = ctk.CTkFrame(self, fg_color="transparent")
-        nav.grid(row=8, column=0, sticky="e", padx=20, pady=20)
-        self._next_btn = ctk.CTkButton(
-            nav, text="Next: Configure  →", font=_FONT_BODY,
-            state="disabled",
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=self._go_next,
+        nav.grid(row=4, column=0, sticky="e", padx=28, pady=(4, 28))
+        self._next_btn = _btn_primary(nav, "Next: Configure  →", self._go_next, width=180)
+        self._next_btn.configure(state="disabled")
+        self._next_btn.pack()
+
+    # ---- helpers ----
+
+    def _patch_seg_text(self):
+        """Force dark text on the unselected (light-grey) segment buttons."""
+        try:
+            for child in self._seg.winfo_children():
+                if isinstance(child, ctk.CTkButton):
+                    # Only change unselected ones (those not in _active set)
+                    pass
+        except Exception:
+            pass
+        # Simpler approach: override after each value change via trace
+        self._fmt_var.trace_add("write", lambda *_: self._recolor_seg())
+        self._recolor_seg()
+
+    def _recolor_seg(self):
+        """Recolor SegmentedButton children so unselected = dark text."""
+        try:
+            active = self._fmt_var.get()
+            for child in self._seg._buttons_dict.values():
+                if hasattr(child, "_text_label") and child._text_label:
+                    pass
+            # Use CTk internal to set text colors per button
+            for val, btn in self._seg._buttons_dict.items():
+                if val == active:
+                    btn.configure(text_color=_WHITE)
+                else:
+                    btn.configure(text_color=_TXT)
+        except Exception:
+            pass
+
+    def _on_fmt_change(self, _=None):
+        is_csv = self._fmt_var.get() == "CSV (2 files)"
+        c = _TXT if is_csv else _MUTED
+        self._purch_lbl.configure(text_color=c)
+        self._purch_browse_btn.configure(
+            state="normal" if is_csv else "disabled",
+            fg_color=_BRAND if is_csv else _BORDER,
+            text_color=_WHITE if is_csv else _MUTED,
         )
-        self._next_btn.grid(row=0, column=0)
-
-    # ---- Event handlers ----
-
-    def _on_format_change(self, value: str):
-        is_csv = value == "CSV (2 files)"
-        self._purch_lbl.configure(text_color=_TEXT_DARK if is_csv else _TEXT_MUTED)
+        self._recolor_seg()
 
     def _browse_deals(self):
-        fmt = self._format_var.get()
-        if fmt == "CSV (2 files)":
-            filetypes = [("CSV files", "*.csv")]
-        else:
-            filetypes = [("Excel files", "*.xlsx *.xlsm")]
-        path = fd.askopenfilename(filetypes=filetypes)
-        if path:
-            self._deals_path = Path(path)
-            self._deals_path_var.set(self._deals_path.name)
+        types = ([("CSV", "*.csv")] if self._fmt_var.get() == "CSV (2 files)"
+                 else [("Excel", "*.xlsx *.xlsm")])
+        p = fd.askopenfilename(filetypes=types)
+        if p:
+            self._deals_path = Path(p)
+            self._deals_var.set(self._deals_path.name)
 
-    def _browse_purchasers(self):
-        path = fd.askopenfilename(filetypes=[("CSV files", "*.csv")])
-        if path:
-            self._purchasers_path = Path(path)
-            self._purch_path_var.set(self._purchasers_path.name)
+    def _browse_purch(self):
+        p = fd.askopenfilename(filetypes=[("CSV", "*.csv")])
+        if p:
+            self._purch_path = Path(p)
+            self._purch_var.set(self._purch_path.name)
 
-    def _load_files(self):
-        fmt = self._format_var.get()
+    def _load(self):
+        fmt = self._fmt_var.get()
         try:
             if fmt == "CSV (2 files)":
                 if not self._deals_path:
-                    self._set_status("Please select the deals CSV file.", error=True)
-                    return
-                if not self._purchasers_path:
-                    self._set_status("Please select the purchasers CSV file.", error=True)
-                    return
-                self._deals_df, self._purchasers_df = get_raw_dataframes(
-                    self._deals_path, self._purchasers_path)
+                    return self._status("Please select the deals CSV.", err=True)
+                if not self._purch_path:
+                    return self._status("Please select the purchasers CSV.", err=True)
+                self._deals_df, self._purch_df = get_raw_dataframes(
+                    self._deals_path, self._purch_path)
             else:
                 if not self._deals_path:
-                    self._set_status("Please select the Excel file.", error=True)
-                    return
-                self._deals_df, self._purchasers_df = get_raw_dataframes(self._deals_path)
+                    return self._status("Please select the Excel file.", err=True)
+                self._deals_df, self._purch_df = get_raw_dataframes(self._deals_path)
 
-            self._set_status(
-                f"Loaded {len(self._deals_df)} deals and {len(self._purchasers_df)} purchasers.",
-                error=False,
-            )
+            self._status(
+                f"✓  {len(self._deals_df)} deals · {len(self._purch_df)} purchasers loaded.")
             self._render_preview()
             self._ml_btn.configure(state="normal")
             self._next_btn.configure(state="normal")
-
-        except Exception as exc:
-            self._set_status(f"Error loading file: {exc}", error=True)
+        except Exception as e:
+            self._status(f"Error: {e}", err=True)
 
     def _render_preview(self):
-        for widget in self._preview_frame.winfo_children():
-            widget.destroy()
+        for w in self._preview_inner.winfo_children():
+            w.destroy()
 
-        # Deals preview
-        ctk.CTkLabel(self._preview_frame, text=f"Deals ({len(self._deals_df)} rows)",
-                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
-            row=0, column=0, sticky="w", pady=(0, 4))
-        _ScrollableTable(
-            self._preview_frame,
-            df=self._deals_df.head(20),
-            fg_color=_BG_SURFACE, height=160,
-        ).grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        pp = ctk.CTkFrame(self._preview_inner, fg_color="transparent")
+        pp.pack(fill="x", pady=(4, 0))
+        pp.grid_columnconfigure(0, weight=1)
+        pp.grid_columnconfigure(1, weight=1)
 
-        # Purchasers preview
-        ctk.CTkLabel(self._preview_frame,
-                     text=f"Purchasers ({len(self._purchasers_df)} rows)",
-                     font=_FONT_SMALL, text_color=_TEXT_MUTED).grid(
-            row=2, column=0, sticky="w", pady=(0, 4))
-        _ScrollableTable(
-            self._preview_frame,
-            df=self._purchasers_df,
-            fg_color=_BG_SURFACE, height=160,
-        ).grid(row=3, column=0, sticky="ew")
+        # Deals
+        dl = ctk.CTkFrame(pp, fg_color="transparent")
+        dl.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        _small(dl, text=f"Deals  —  {len(self._deals_df)} rows",
+               color=_MUTED).pack(anchor="w", pady=(0, 4))
+        _Table(dl, df=self._deals_df.head(20), height=160).pack(fill="x")
 
-        self._preview_frame.grid_columnconfigure(0, weight=1)
+        # Purchasers
+        pr = ctk.CTkFrame(pp, fg_color="transparent")
+        pr.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        _small(pr, text=f"Purchasers  —  {len(self._purch_df)} rows",
+               color=_MUTED).pack(anchor="w", pady=(0, 4))
+        _Table(pr, df=self._purch_df, height=160).pack(fill="x")
 
     def _run_ml(self):
         if self._deals_df is None:
             return
         df = self._deals_df.copy()
         df.columns = [c.strip().lower() for c in df.columns]
+        ids   = df["deal_id"].astype(str).tolist()
+        vals  = df["deal_value"].astype(float).tolist()
+        types = df["deal_type"].astype(str).tolist() if "deal_type" in df.columns else None
 
-        deal_ids   = df["deal_id"].astype(str).tolist()
-        deal_vals  = df["deal_value"].astype(float).tolist()
-        orig_types = df["deal_type"].astype(str).tolist() if "deal_type" in df.columns else None
-
-        self._ml_summary = classify_deals(deal_ids, deal_vals, orig_types)
+        self._ml_summary = classify_deals(ids, vals, types)
         s = self._ml_summary
 
-        # Update deal_type column in the preview dataframe
         suggestions = {r.deal_id: r.suggested_type for r in s.results}
         self._deals_df["deal_type"] = self._deals_df.apply(
-            lambda row: suggestions.get(str(row.get("deal_id", row.get("Deal ID", ""))).strip(),
-                                        row.get("deal_type", row.get("Deal Type", "Prepay"))),
-            axis=1,
-        )
+            lambda row: suggestions.get(
+                str(row.get("deal_id", row.get("Deal ID", ""))).strip(),
+                row.get("deal_type", row.get("Deal Type", "Prepay"))),
+            axis=1)
         self._render_preview()
 
-        msg = (
-            f"ML classified {s.prepay_count} Prepay / {s.ppa_count} PPA. "
-            f"{s.override_count} override(s) suggested."
-        )
+        msg = f"{s.prepay_count} Prepay · {s.ppa_count} PPA"
+        if s.override_count:
+            msg += f" · {s.override_count} override(s) suggested"
         if s.warning:
-            msg += f"  Note: {s.warning}"
-        self._ml_status_var.set(msg)
+            msg += f"  —  {s.warning}"
+        self._ml_var.set(msg)
 
-    def _set_status(self, msg: str, error: bool = False):
+    def _status(self, msg: str, err: bool = False):
         self._status_var.set(msg)
-        color = _COLOR_ERROR if error else _COLOR_SUCCESS
-        self._status_lbl.configure(text_color=(color, color))
+        self._status_lbl.configure(text_color=_ERR if err else _OK)
 
     def _go_next(self):
         try:
-            fmt = self._format_var.get()
-            if fmt == "CSV (2 files)":
-                data = load_file(self._deals_path, self._purchasers_path)
-            else:
-                data = load_file(self._deals_path)
-
-            # Apply ML suggestions if classifier was run
+            fmt = self._fmt_var.get()
+            data = (load_file(self._deals_path, self._purch_path)
+                    if fmt == "CSV (2 files)" else load_file(self._deals_path))
             if self._ml_summary:
                 data.deals_type = apply_classification(
                     data.deals, data.deals_type, self._ml_summary)
-
             self._app.ctx.data = data
             self._app.go_to(1)
-
-        except Exception as exc:
-            self._set_status(f"Validation error: {exc}", error=True)
+        except Exception as e:
+            self._status(f"Validation error: {e}", err=True)
 
 
 # ---------------------------------------------------------------------------
 # Screen 2 — Configure & Run
 # ---------------------------------------------------------------------------
 
-class Screen2(ctk.CTkFrame):
-    """Solver configuration and run screen with live log output."""
-
-    def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
+class Screen2(ctk.CTkScrollableFrame):
+    def __init__(self, parent: "App", **kw):
+        super().__init__(parent, fg_color=_PAGE, **kw)
         self._app = parent
+        self.grid_columnconfigure(0, weight=1)
         self._build()
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self, text="Configure & Run", font=F_TITLE(),
+                     text_color=_BRAND, anchor="w",
+                     ).grid(row=0, column=0, sticky="w", padx=28, pady=(24, 18))
 
-        # ---- Parameters ----
-        _SectionLabel(self, text="Optimiser Settings").grid(
-            row=0, column=0, sticky="w", padx=20, pady=(20, 4))
-        _Divider(self).grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 16))
+        # ---- Settings card ----
+        sc = _card(self)
+        sc.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
+        sp = ctk.CTkFrame(sc, fg_color="transparent")
+        sp.pack(fill="x", padx=20, pady=20)
+        sp.grid_columnconfigure(1, weight=1)
 
-        params = ctk.CTkFrame(self, fg_color="transparent")
-        params.grid(row=2, column=0, sticky="ew", padx=20)
-        params.grid_columnconfigure(1, weight=1)
+        _section_g(sp, "Optimiser Settings", ncols=3)
 
         # Time limit
-        ctk.CTkLabel(params, text="Time limit (seconds):", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=0, column=0, sticky="w", padx=(0, 16), pady=8)
+        _lbl(sp, "Time limit:").grid(row=2, column=0, sticky="w", pady=10)
         self._time_var = ctk.IntVar(value=60)
-        self._time_display = ctk.CTkLabel(params, text="60 s", font=_FONT_BODY,
-                                           text_color=_BRAND, width=50)
-        self._time_display.grid(row=0, column=2, padx=(8, 0))
-        ctk.CTkSlider(
-            params, from_=10, to=300, number_of_steps=29,
-            variable=self._time_var,
-            button_color=_ACCENT, button_hover_color="#B5851E",
-            progress_color=_BRAND,
-            command=lambda v: self._time_display.configure(text=f"{int(v)} s"),
-        ).grid(row=0, column=1, sticky="ew")
+        self._time_lbl = ctk.CTkLabel(sp, text="60 s", font=F_BODY(),
+                                       text_color=_ACCENT, width=52, anchor="w")
+        self._time_lbl.grid(row=2, column=2, padx=(12, 0))
+        ctk.CTkSlider(sp, from_=10, to=300, number_of_steps=29,
+                      variable=self._time_var,
+                      button_color=_ACCENT, button_hover_color="#b5841e",
+                      progress_color=_BRAND,
+                      command=lambda v: self._time_lbl.configure(text=f"{int(v)} s"),
+                      ).grid(row=2, column=1, sticky="ew")
 
-        # Min deal toggle
-        ctk.CTkLabel(params, text="Each purchaser gets at least 1 deal:", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=1, column=0, sticky="w", padx=(0, 16), pady=8)
-        self._min_deal_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(params, text="", variable=self._min_deal_var,
-                      progress_color=_BRAND, button_color=_ACCENT,
-                      button_hover_color="#B5851E").grid(row=1, column=1, sticky="w")
+        # Toggles
+        rows = [
+            ("Each purchaser gets ≥ 1 deal", "_min_var", True),
+            ("Penalise preference mismatches",  "_pref_var", True),
+        ]
+        for i, (label, attr, default) in enumerate(rows):
+            _lbl(sp, label).grid(row=3 + i, column=0, sticky="w", pady=8)
+            var = ctk.BooleanVar(value=default)
+            setattr(self, attr, var)
+            ctk.CTkSwitch(sp, text="", variable=var,
+                          progress_color=_BRAND,
+                          button_color=_ACCENT, button_hover_color="#b5841e",
+                          ).grid(row=3 + i, column=1, sticky="w")
 
-        # Pref penalty toggle
-        ctk.CTkLabel(params, text="Penalise preference mismatches:", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=2, column=0, sticky="w", padx=(0, 16), pady=8)
-        self._pref_var = ctk.BooleanVar(value=True)
-        ctk.CTkSwitch(params, text="", variable=self._pref_var,
-                      progress_color=_BRAND, button_color=_ACCENT,
-                      button_hover_color="#B5851E").grid(row=2, column=1, sticky="w")
+        # ---- Run card ----
+        rc = _card(self)
+        rc.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 16))
+        rp = ctk.CTkFrame(rc, fg_color="transparent")
+        rp.pack(fill="x", padx=20, pady=20)
 
-        # ---- Run button ----
-        run_row = ctk.CTkFrame(self, fg_color="transparent")
-        run_row.grid(row=3, column=0, sticky="w", padx=20, pady=(20, 8))
-        self._run_btn = ctk.CTkButton(
-            run_row, text="Run Optimisation", font=_FONT_HEADING,
-            width=200, height=44,
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=self._run,
-        )
-        self._run_btn.grid(row=0, column=0)
-        self._spinner_lbl = ctk.CTkLabel(run_row, text="", font=_FONT_SMALL,
-                                          text_color=_TEXT_DARK, width=200)
-        self._spinner_lbl.grid(row=0, column=1, padx=16)
+        _section(rp, "Run")
 
-        # ---- Log ----
-        _SectionLabel(self, text="Solver Log").grid(
-            row=4, column=0, sticky="w", padx=20, pady=(16, 4))
-        _Divider(self).grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 8))
+        run_row = ctk.CTkFrame(rp, fg_color="transparent")
+        run_row.pack(fill="x", pady=(0, 4))
 
-        self._log = ctk.CTkTextbox(
-            self, font=_FONT_MONO, state="disabled", height=240,
-            fg_color=_BG_SURFACE, text_color=_TEXT_DARK,
-            border_color="#D0D8E4", border_width=1,
-        )
-        self._log.grid(row=6, column=0, sticky="nsew", padx=20)
-        self.grid_rowconfigure(6, weight=1)
+        self._run_btn = _btn_primary(run_row, "Run Optimisation",
+                                      self._run, width=180)
+        self._run_btn.pack(side="left")
+        self._run_lbl = _small(run_row, text="", color=_MUTED)
+        self._run_lbl.pack(side="left", padx=16)
+
+        # ---- Log card ----
+        lc = _card(self)
+        lc.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 16))
+        lp = ctk.CTkFrame(lc, fg_color="transparent")
+        lp.pack(fill="both", expand=True, padx=20, pady=20)
+
+        _section(lp, "Solver Log")
+
+        self._log = ctk.CTkTextbox(lp, font=F_MONO(), state="disabled",
+                                    height=220, fg_color="#f8f9fb",
+                                    text_color=_TXT, border_color=_BORDER,
+                                    border_width=1, corner_radius=6)
+        self._log.pack(fill="x")
 
         # ---- Navigation ----
         nav = ctk.CTkFrame(self, fg_color="transparent")
-        nav.grid(row=7, column=0, sticky="ew", padx=20, pady=20)
+        nav.grid(row=4, column=0, sticky="ew", padx=28, pady=(4, 28))
         nav.grid_columnconfigure(1, weight=1)
-        ctk.CTkButton(
-            nav, text="← Back", font=_FONT_BODY,
-            fg_color="transparent", border_width=1,
-            border_color=_BRAND, text_color=_BRAND,
-            hover_color="#E8ECF2",
-            command=lambda: self._app.go_to(0),
-        ).grid(row=0, column=0)
-        self._next_btn = ctk.CTkButton(
-            nav, text="View Results  →", font=_FONT_BODY,
-            state="disabled",
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=lambda: self._app.go_to(2),
-        )
+        _btn_ghost(nav, "← Back", lambda: self._app.go_to(0), width=100
+                   ).grid(row=0, column=0)
+        self._next_btn = _btn_primary(nav, "View Results  →",
+                                       lambda: self._app.go_to(2), width=180)
+        self._next_btn.configure(state="disabled")
         self._next_btn.grid(row=0, column=2)
 
     def _log_append(self, msg: str):
@@ -590,44 +605,39 @@ class Screen2(ctk.CTkFrame):
         if data is None:
             mb.showerror("No data", "Please load data first.")
             return
-
-        data.min_deal    = self._min_deal_var.get()
+        data.min_deal     = self._min_var.get()
         data.pref_penalty = self._pref_var.get()
-        time_limit       = int(self._time_var.get())
+        tl = int(self._time_var.get())
 
         self._run_btn.configure(state="disabled")
         self._next_btn.configure(state="disabled")
-        self._spinner_lbl.configure(text="Solving...", text_color=_COLOR_WARNING)
-        self._log_append(f"Starting optimisation  (time limit: {time_limit}s) ...")
+        self._run_lbl.configure(text="Solving…", text_color=_WARN)
+        self._log_append(f"Starting optimisation  (time limit: {tl}s)…")
 
         def worker():
             try:
                 result = optimize(
-                    data,
-                    time_limit=time_limit,
-                    verbose=False,
-                    progress_callback=lambda msg: self.after(0, self._log_append, msg),
-                )
+                    data, time_limit=tl, verbose=False,
+                    progress_callback=lambda m: self.after(0, self._log_append, m))
                 self._app.ctx.result = result
-                self.after(0, self._on_done, result)
+                self.after(0, self._done, result)
             except Exception as exc:
-                self.after(0, self._on_error, str(exc))
+                self.after(0, self._error, str(exc))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_done(self, result: AllocationResult):
+    def _done(self, result: AllocationResult):
         self._run_btn.configure(state="normal")
-        self._spinner_lbl.configure(text="Done!", text_color=_COLOR_SUCCESS)
+        self._run_lbl.configure(text="✓  Done", text_color=_OK)
         self._log_append(
-            f"\nResult: {result.status} | "
-            f"Value: ${result.total_value:,.0f} | "
-            f"Unallocated: {result.unallocated_count}/{len(result.allocations)}"
-        )
+            f"\nStatus: {result.status}  |  "
+            f"Value: ${result.total_value:,.0f}  |  "
+            f"Unallocated: {result.unallocated_count}/{len(result.allocations)}")
         self._next_btn.configure(state="normal")
 
-    def _on_error(self, msg: str):
+    def _error(self, msg: str):
         self._run_btn.configure(state="normal")
-        self._spinner_lbl.configure(text="Error", text_color=_COLOR_ERROR)
+        self._run_lbl.configure(text="✗  Error", text_color=_ERR)
         self._log_append(f"ERROR: {msg}")
         mb.showerror("Optimiser error", msg)
 
@@ -636,222 +646,186 @@ class Screen2(ctk.CTkFrame):
 # Screen 3 — Results & What-If
 # ---------------------------------------------------------------------------
 
-class Screen3(ctk.CTkFrame):
-    """Results table, metrics, What-If analysis, and export."""
-
-    def __init__(self, parent: "App", **kwargs):
-        super().__init__(parent, fg_color=_BG_PAGE, **kwargs)
+class Screen3(ctk.CTkScrollableFrame):
+    def __init__(self, parent: "App", **kw):
+        super().__init__(parent, fg_color=_PAGE, **kw)
         self._app = parent
-        self._sensitivity: Optional[SensitivityModel] = None
+        self._sens: Optional[SensitivityModel] = None
+        self.grid_columnconfigure(0, weight=1)
         self._build()
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self, text="Allocation Results", font=F_TITLE(),
+                     text_color=_BRAND, anchor="w",
+                     ).grid(row=0, column=0, sticky="w", padx=28, pady=(24, 18))
 
-        # ---- Summary metrics ----
-        _SectionLabel(self, text="Summary").grid(
-            row=0, column=0, sticky="w", padx=20, pady=(20, 4))
-        _Divider(self).grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 8))
-
+        # ---- Metrics row ----
         self._metrics_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._metrics_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 8))
+        self._metrics_frame.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 16))
 
-        # ---- Results table ----
-        _SectionLabel(self, text="Allocation Results").grid(
-            row=3, column=0, sticky="w", padx=20, pady=(12, 4))
-        _Divider(self).grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 8))
+        # ---- Results table card ----
+        tc = _card(self)
+        tc.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 16))
+        tp = ctk.CTkFrame(tc, fg_color="transparent")
+        tp.pack(fill="both", expand=True, padx=20, pady=20)
+        tp.grid_columnconfigure(0, weight=1)
 
-        self._table_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._table_frame.grid(row=5, column=0, sticky="nsew", padx=20)
+        _section_g(tp, "Deal Allocations", ncols=1)
+        self._table_frame = ctk.CTkFrame(tp, fg_color="transparent")
+        self._table_frame.grid(row=2, column=0, sticky="ew")
         self._table_frame.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(5, weight=1)
 
-        # ---- What-If ----
-        _SectionLabel(self, text="What-If Analysis").grid(
-            row=6, column=0, sticky="w", padx=20, pady=(16, 4))
-        _Divider(self).grid(row=7, column=0, sticky="ew", padx=20, pady=(0, 8))
+        # ---- What-If card ----
+        wc = _card(self)
+        wc.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 16))
+        wp = ctk.CTkFrame(wc, fg_color="transparent")
+        wp.pack(fill="x", padx=20, pady=20)
 
-        self._whatif_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._whatif_frame.grid(row=8, column=0, sticky="ew", padx=20)
-        self._whatif_frame.grid_columnconfigure(3, weight=1)
-        self._build_whatif()
+        _section(wp, "What-If Analysis")
+        _small(wp, text=(
+            "Select a purchaser and a budget change to estimate the impact "
+            "on total allocated value."
+        ), color=_MUTED).pack(anchor="w", pady=(0, 14))
 
-        # ---- Export + navigation ----
-        action_bar = ctk.CTkFrame(self, fg_color="transparent")
-        action_bar.grid(row=9, column=0, sticky="ew", padx=20, pady=20)
-        action_bar.grid_columnconfigure(2, weight=1)
+        # Controls row
+        ctrl = ctk.CTkFrame(wp, fg_color="transparent")
+        ctrl.pack(fill="x")
+        ctrl.grid_columnconfigure(1, weight=1)
+        ctrl.grid_columnconfigure(3, weight=1)
 
-        ctk.CTkButton(
-            action_bar, text="← Back", font=_FONT_BODY,
-            fg_color="transparent", border_width=1,
-            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
-            command=lambda: self._app.go_to(1),
-        ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
-            action_bar, text="Export CSV", font=_FONT_BODY,
-            fg_color=_BRAND, hover_color="#004080", text_color=_TEXT_WHITE,
-            command=self._export_csv,
-        ).grid(row=0, column=1, padx=(0, 8))
-        ctk.CTkButton(
-            action_bar, text="Export Excel", font=_FONT_BODY,
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=self._export_excel,
-        ).grid(row=0, column=2, sticky="w")
-        ctk.CTkButton(
-            action_bar, text="Run Again with New Data", font=_FONT_BODY,
-            fg_color="transparent", border_width=1,
-            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
-            command=self._run_again,
-        ).grid(row=0, column=3, sticky="e")
-
-    def _build_whatif(self):
-        f = self._whatif_frame
-
-        ctk.CTkLabel(f, text="Purchaser:", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=0, column=0, sticky="w", padx=(0, 8), pady=6)
-        self._wi_purchaser_var = ctk.StringVar()
-        self._wi_dropdown = ctk.CTkOptionMenu(
-            f, variable=self._wi_purchaser_var,
-            values=["(load results first)"], width=220, font=_FONT_SMALL,
-            fg_color=_BRAND, button_color="#004080", button_hover_color="#005599",
-            text_color=_TEXT_WHITE,
+        _lbl(ctrl, "Purchaser:").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self._wi_p_var = ctk.StringVar()
+        self._wi_dd = ctk.CTkOptionMenu(
+            ctrl, variable=self._wi_p_var,
+            values=["(load results first)"], width=200, font=F_SMALL(),
+            fg_color=_BRAND, button_color="#00264d",
+            button_hover_color="#004a99",
+            text_color=_WHITE,
         )
-        self._wi_dropdown.grid(row=0, column=1, padx=(0, 20), pady=6)
+        self._wi_dd.grid(row=0, column=1, sticky="w", padx=(0, 24))
 
-        ctk.CTkLabel(f, text="Budget change:", font=_FONT_BODY,
-                     text_color=_TEXT_DARK).grid(
-            row=0, column=2, sticky="w", padx=(0, 8))
+        _lbl(ctrl, "Budget change:").grid(row=0, column=2, sticky="w", padx=(0, 10))
         self._wi_pct_var = ctk.DoubleVar(value=0.10)
-        self._wi_pct_display = ctk.CTkLabel(f, text="+10%", font=_FONT_BODY,
-                                             text_color=_ACCENT, width=50)
-        self._wi_pct_display.grid(row=0, column=4, padx=(8, 0))
-        ctk.CTkSlider(
-            f, from_=-0.30, to=0.30, number_of_steps=12,
-            variable=self._wi_pct_var, width=200,
-            button_color=_ACCENT, button_hover_color="#B5851E",
-            progress_color=_BRAND,
-            command=self._on_wi_slider,
-        ).grid(row=0, column=3)
+        self._wi_pct_lbl = ctk.CTkLabel(ctrl, text="+10%", font=F_BODY(),
+                                         text_color=_ACCENT, width=52, anchor="w")
+        self._wi_pct_lbl.grid(row=0, column=4, padx=(10, 0))
+        ctk.CTkSlider(ctrl, from_=-0.30, to=0.30, number_of_steps=12,
+                      variable=self._wi_pct_var, width=200,
+                      button_color=_ACCENT, button_hover_color="#b5841e",
+                      progress_color=_BRAND,
+                      command=self._on_wi_slider,
+                      ).grid(row=0, column=3)
 
-        self._wi_analyse_btn = ctk.CTkButton(
-            f, text="Analyse", font=_FONT_BODY, width=100,
-            fg_color=_ACCENT, hover_color="#B5851E", text_color=_TEXT_WHITE,
-            command=self._run_whatif, state="disabled",
-        )
-        self._wi_analyse_btn.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        # Buttons row
+        btn_row = ctk.CTkFrame(wp, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(14, 0))
 
-        self._wi_exact_btn = ctk.CTkButton(
-            f, text="Run Exact", font=_FONT_BODY, width=100,
-            fg_color="transparent", border_width=1,
-            border_color=_BRAND, text_color=_BRAND, hover_color="#E8ECF2",
-            command=self._run_whatif_exact, state="disabled",
-        )
-        self._wi_exact_btn.grid(row=1, column=2, sticky="w", pady=(8, 0))
+        self._wi_analyse = _btn_primary(btn_row, "Analyse", self._run_wi, width=120)
+        self._wi_analyse.configure(state="disabled")
+        self._wi_analyse.pack(side="left", padx=(0, 10))
 
+        self._wi_exact = _btn_ghost(btn_row, "Run Exact", self._run_wi_exact, width=120)
+        self._wi_exact.configure(state="disabled")
+        self._wi_exact.pack(side="left")
+
+        # Result text
         self._wi_result_var = ctk.StringVar(value="")
-        ctk.CTkLabel(
-            f, textvariable=self._wi_result_var,
-            font=_FONT_SMALL, wraplength=700, justify="left",
-            text_color=_TEXT_DARK,
-        ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        ctk.CTkLabel(wp, textvariable=self._wi_result_var,
+                     font=F_SMALL(), text_color=_TXT,
+                     wraplength=820, justify="left",
+                     ).pack(anchor="w", pady=(12, 0))
 
-    def _on_wi_slider(self, val):
-        pct = float(val)
-        sign = "+" if pct >= 0 else ""
-        self._wi_pct_display.configure(text=f"{sign}{pct:.0%}")
+        # ---- Action bar ----
+        ab = ctk.CTkFrame(self, fg_color="transparent")
+        ab.grid(row=4, column=0, sticky="ew", padx=28, pady=(4, 28))
+        ab.grid_columnconfigure(2, weight=1)
 
-    # ---- Populate on entry ----
+        _btn_ghost(ab, "← Back", lambda: self._app.go_to(1), width=100
+                   ).grid(row=0, column=0, padx=(0, 8))
+        _btn_secondary(ab, "Export CSV", self._export_csv, width=130
+                       ).grid(row=0, column=1, padx=(0, 8))
+        _btn_primary(ab, "Export Excel", self._export_excel, width=130
+                     ).grid(row=0, column=2, sticky="w")
+        _btn_ghost(ab, "⟳  Run Again", self._run_again, width=150
+                   ).grid(row=0, column=3, sticky="e")
+
+    # ---- populate on entry ----
 
     def populate(self):
-        """Called by App.go_to() each time Screen3 becomes visible."""
         result = self._app.ctx.result
         data   = self._app.ctx.data
         if result is None or data is None:
             return
         self._render_metrics(data, result)
         self._render_table(data, result)
-        self._update_whatif_controls(data)
+        self._update_wi(data)
 
     def _render_metrics(self, data: AllocationInput, result: AllocationResult):
         for w in self._metrics_frame.winfo_children():
             w.destroy()
 
-        total_deals   = len(result.allocations)
-        allocated     = total_deals - result.unallocated_count
-        pct_allocated = allocated / total_deals * 100 if total_deals else 0
-        total_budget  = sum(data.purchasers)
-        pct_budget    = result.total_value / total_budget * 100 if total_budget else 0
+        total  = len(result.allocations)
+        alloc  = total - result.unallocated_count
+        pct_d  = alloc / total * 100 if total else 0
+        budget = sum(data.purchasers)
+        pct_b  = result.total_value / budget * 100 if budget else 0
 
-        metrics = [
-            ("Status",           result.status,                  _COLOR_SUCCESS if result.status == "Optimal" else _COLOR_WARNING),
-            ("Total Value",      f"${result.total_value:,.0f}",  ("gray10", "gray90")),
-            ("Deals Allocated",  f"{allocated}/{total_deals}  ({pct_allocated:.0f}%)", ("gray10", "gray90")),
-            ("Budget Used",      f"{pct_budget:.1f}%",           ("gray10", "gray90")),
+        cards = [
+            ("Solver Status",     result.status,
+             _OK if result.status == "Optimal" else _WARN),
+            ("Total Value",       f"${result.total_value:,.0f}", _BRAND),
+            ("Deals Allocated",   f"{alloc}/{total}",            _TXT),
+            ("Budget Used",       f"{pct_b:.1f}%",               _TXT),
         ]
-
-        for col, (label, value, color) in enumerate(metrics):
-            card = ctk.CTkFrame(self._metrics_frame, corner_radius=8,
-                                fg_color=_BG_SURFACE,
-                                border_width=1, border_color="#D0D8E4")
-            card.grid(row=0, column=col, padx=(0, 12), pady=4, sticky="nsew")
-            self._metrics_frame.grid_columnconfigure(col, weight=1)
-            ctk.CTkLabel(card, text=label, font=_FONT_SMALL,
-                         text_color=_TEXT_MUTED).pack(padx=16, pady=(10, 2))
-            ctk.CTkLabel(card, text=value, font=_FONT_HEADING,
-                         text_color=color).pack(padx=16, pady=(0, 10))
+        for i, (lbl, val, col) in enumerate(cards):
+            c = _card(self._metrics_frame)
+            c.grid(row=0, column=i, padx=(0, 12), sticky="nsew")
+            self._metrics_frame.grid_columnconfigure(i, weight=1)
+            _small(c, text=lbl, color=_MUTED).pack(padx=16, pady=(12, 2), anchor="w")
+            ctk.CTkLabel(c, text=val, font=F_METRIC(),
+                         text_color=col, anchor="w").pack(padx=16, pady=(0, 12))
 
     def _render_table(self, data: AllocationInput, result: AllocationResult):
         for w in self._table_frame.winfo_children():
             w.destroy()
-
-        deal_type_map  = dict(data.deals_type)
-        type_labels    = {0: "Prepay", 1: "PPA"}
+        dtype  = dict(data.deals_type)
+        tnames = {0: "Prepay", 1: "PPA"}
         rows = []
-        for i, (deal_id, deal_value) in enumerate(data.deals):
-            p_idx  = result.allocations[i]
-            p_name = data.purchaser_ids[p_idx - 1] if p_idx > 0 else "Unallocated"
-            rows.append({
-                "Deal ID":        deal_id,
-                "Value ($)":      f"{deal_value:,}",
-                "Type":           type_labels.get(deal_type_map.get(deal_id, 0), "?"),
-                "Assigned To":    p_name,
-            })
+        for i, (did, dval) in enumerate(data.deals):
+            pi   = result.allocations[i]
+            pnam = data.purchaser_ids[pi - 1] if pi > 0 else "Unallocated"
+            rows.append({"Deal ID": did, "Value ($)": f"{dval:,}",
+                         "Type": tnames.get(dtype.get(did, 0), "?"),
+                         "Assigned To": pnam})
+        _Table(self._table_frame, df=pd.DataFrame(rows),
+               highlight_col="Assigned To", height=240,
+               ).grid(row=0, column=0, sticky="ew")
 
-        df = pd.DataFrame(rows)
-        _ScrollableTable(
-            self._table_frame, df=df,
-            highlight_col="Assigned To",
-            fg_color=_BG_SURFACE, height=220,
-        ).grid(row=0, column=0, sticky="ew")
-        self._table_frame.grid_columnconfigure(0, weight=1)
+    def _update_wi(self, data: AllocationInput):
+        self._wi_dd.configure(values=data.purchaser_ids)
+        self._wi_p_var.set(data.purchaser_ids[0] if data.purchaser_ids else "")
+        self._wi_analyse.configure(state="normal")
+        self._wi_exact.configure(state="normal")
+        self._sens = None
 
-    def _update_whatif_controls(self, data: AllocationInput):
-        names = data.purchaser_ids
-        self._wi_dropdown.configure(values=names)
-        self._wi_purchaser_var.set(names[0] if names else "")
-        self._wi_analyse_btn.configure(state="normal")
-        self._wi_exact_btn.configure(state="normal")
-        self._sensitivity = None  # Reset on new results
+    def _on_wi_slider(self, val):
+        pct  = float(val)
+        sign = "+" if pct >= 0 else ""
+        self._wi_pct_lbl.configure(text=f"{sign}{pct:.0%}")
 
-    # ---- What-If handlers ----
-
-    def _run_whatif(self):
-        data   = self._app.ctx.data
-        result = self._app.ctx.result
+    def _run_wi(self):
+        data, result = self._app.ctx.data, self._app.ctx.result
         if data is None or result is None:
             return
-
-        p_name = self._wi_purchaser_var.get()
+        p_name = self._wi_p_var.get()
         try:
             p_idx = data.purchaser_ids.index(p_name)
         except ValueError:
             return
-
         pct = float(self._wi_pct_var.get())
-        self._wi_result_var.set("Computing sensitivity model... (this may take ~30s)")
-        self._wi_analyse_btn.configure(state="disabled")
-        self._wi_exact_btn.configure(state="disabled")
+        self._wi_result_var.set("Building sensitivity model… (~30 s)")
+        self._wi_analyse.configure(state="disabled")
+        self._wi_exact.configure(state="disabled")
 
         def worker():
             try:
@@ -859,96 +833,81 @@ class Screen3(ctk.CTkFrame):
                     data, p_idx, result.total_value,
                     solver_time_limit=10,
                     progress_callback=lambda m: self.after(
-                        0, self._wi_result_var.set, f"Analysing... {m}"),
-                )
+                        0, self._wi_result_var.set, f"Analysing…  {m}"))
                 wi = what_if(sens, pct)
-                self._sensitivity = sens
-                self.after(0, self._wi_show, wi.explanation)
+                self._sens = sens
+                self.after(0, self._wi_result_var.set, wi.explanation)
             except Exception as exc:
-                self.after(0, self._wi_show, f"Error: {exc}")
+                self.after(0, self._wi_result_var.set, f"Error: {exc}")
             finally:
-                self.after(0, self._wi_analyse_btn.configure, {"state": "normal"})
-                self.after(0, self._wi_exact_btn.configure, {"state": "normal"})
+                self.after(0, self._wi_analyse.configure, {"state": "normal"})
+                self.after(0, self._wi_exact.configure,   {"state": "normal"})
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _run_whatif_exact(self):
+    def _run_wi_exact(self):
         from app.sensitivity import what_if_exact
-        data   = self._app.ctx.data
-        result = self._app.ctx.result
-        if data is None or result is None or self._sensitivity is None:
-            self._wi_result_var.set(
-                "Please run 'Analyse' first to build the sensitivity model.")
+        data, result = self._app.ctx.data, self._app.ctx.result
+        if data is None or result is None or self._sens is None:
+            self._wi_result_var.set("Run 'Analyse' first to build the sensitivity model.")
             return
-
         pct = float(self._wi_pct_var.get())
-        self._wi_result_var.set("Running exact solve...")
-        self._wi_analyse_btn.configure(state="disabled")
-        self._wi_exact_btn.configure(state="disabled")
+        self._wi_result_var.set("Running exact solve…")
+        self._wi_analyse.configure(state="disabled")
+        self._wi_exact.configure(state="disabled")
 
         def worker():
             try:
                 wi = what_if_exact(
-                    data, self._sensitivity, pct,
-                    solver_time_limit=30,
+                    data, self._sens, pct, solver_time_limit=30,
                     progress_callback=lambda m: self.after(
-                        0, self._wi_result_var.set, f"Solving... {m}"),
-                )
-                self.after(0, self._wi_show, wi.explanation)
+                        0, self._wi_result_var.set, f"Solving…  {m}"))
+                self.after(0, self._wi_result_var.set, wi.explanation)
             except Exception as exc:
-                self.after(0, self._wi_show, f"Error: {exc}")
+                self.after(0, self._wi_result_var.set, f"Error: {exc}")
             finally:
-                self.after(0, self._wi_analyse_btn.configure, {"state": "normal"})
-                self.after(0, self._wi_exact_btn.configure, {"state": "normal"})
+                self.after(0, self._wi_analyse.configure, {"state": "normal"})
+                self.after(0, self._wi_exact.configure,   {"state": "normal"})
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _wi_show(self, text: str):
-        self._wi_result_var.set(text)
-
-    # ---- Export ----
-
     def _export_csv(self):
         data, result = self._app.ctx.data, self._app.ctx.result
-        if data is None or result is None:
+        if not data or not result:
             return
-        path = fd.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile="allocation_results.csv",
-        )
-        if path:
+        p = fd.asksaveasfilename(defaultextension=".csv",
+                                  filetypes=[("CSV", "*.csv")],
+                                  initialfile="allocation_results.csv")
+        if p:
             try:
-                export_csv(data, result, path)
-                mb.showinfo("Export", f"CSV saved to:\n{path}")
-            except Exception as exc:
-                mb.showerror("Export error", str(exc))
+                export_csv(data, result, p)
+                mb.showinfo("Exported", f"CSV saved:\n{p}")
+            except Exception as e:
+                mb.showerror("Export error", str(e))
 
     def _export_excel(self):
         data, result = self._app.ctx.data, self._app.ctx.result
-        if data is None or result is None:
+        if not data or not result:
             return
-        path = fd.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel files", "*.xlsx")],
-            initialfile="allocation_results.xlsx",
-        )
-        if path:
+        p = fd.asksaveasfilename(defaultextension=".xlsx",
+                                  filetypes=[("Excel", "*.xlsx")],
+                                  initialfile="allocation_results.xlsx")
+        if p:
             try:
-                export_excel(data, result, path)
-                mb.showinfo("Export", f"Excel saved to:\n{path}")
-            except Exception as exc:
-                mb.showerror("Export error", str(exc))
+                export_excel(data, result, p)
+                mb.showinfo("Exported", f"Excel saved:\n{p}")
+            except Exception as e:
+                mb.showerror("Export error", str(e))
 
     def _run_again(self):
         self._app.ctx.data   = None
         self._app.ctx.result = None
-        self._sensitivity      = None
+        self._sens           = None
         self._app.go_to(0)
 
 
 # ---------------------------------------------------------------------------
-# Application state
+# App state
 # ---------------------------------------------------------------------------
 
 class AppState:
@@ -957,30 +916,21 @@ class AppState:
 
 
 # ---------------------------------------------------------------------------
-# Main App window
+# Root window
 # ---------------------------------------------------------------------------
 
 class App(ctk.CTk):
-    """Root window that hosts the step bar and all three screens."""
-
     def __init__(self):
         super().__init__()
         self.title("AllocationModel")
-        self.geometry("960x780")
-        self.minsize(860, 660)
-        self.configure(fg_color=_BG_PAGE)
+        self.geometry("980x800")
+        self.minsize(860, 680)
+        self.configure(fg_color=_BRAND)
 
-        # Load custom fonts as soon as we have a Tk root
+        # Load fonts before building any widgets
         _load_fonts(self)
 
-        # Refresh module-level font tuples to use loaded families
-        global _FONT_TITLE, _FONT_HEADING, _FONT_BODY, _FONT_SMALL
-        _FONT_TITLE   = _font_title()
-        _FONT_HEADING = _font_heading()
-        _FONT_BODY    = _font_body()
-        _FONT_SMALL   = _font_small()
-
-        # Window icon (best-effort — silently skipped if file is missing)
+        # Window icon
         try:
             icon = tk.PhotoImage(file=str(_ICON_PATH))
             self.wm_iconphoto(True, icon)
@@ -994,35 +944,29 @@ class App(ctk.CTk):
 
         # Step bar
         self._step_bar = _StepBar(self)
-        self._step_bar.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 0))
+        self._step_bar.grid(row=0, column=0, sticky="ew")
 
-        # Screens
+        # Screens — built AFTER _load_fonts so font families are available
         self._screens: list[ctk.CTkFrame] = [
             Screen1(self),
             Screen2(self),
             Screen3(self),
         ]
-        for screen in self._screens:
-            screen.grid(row=1, column=0, sticky="nsew")
+        for s in self._screens:
+            s.grid(row=1, column=0, sticky="nsew")
 
         self.go_to(0)
 
     def go_to(self, step: int):
-        """Show the given step screen and hide all others."""
-        for i, screen in enumerate(self._screens):
-            if i == step:
-                screen.tkraise()
-            else:
-                screen.lower()
+        for i, s in enumerate(self._screens):
+            (s.tkraise if i == step else s.lower)()
         self._step_bar.set_active(step)
-
-        # Trigger populate() on Screen3 every time it becomes visible
         if step == 2:
             self._screens[2].populate()
 
 
 # ---------------------------------------------------------------------------
-# Entry point (also called from main.py)
+# Entry point
 # ---------------------------------------------------------------------------
 
 def run():
