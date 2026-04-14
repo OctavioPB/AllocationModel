@@ -1,6 +1,11 @@
 purchaser_id,purchaser_max,purchaser_preference
-Fund Alpha,550000,PPA
-Fund Beta,400000,PPA
-Fund Gamma,80000,Prepay
-Fund Delta,120000,Prepay
-Fund Epsilon,60000,Prepay
+Fund Alpha,1250000,PPA
+Fund Beta,980000,PPA
+Fund Gamma,620000,PPA
+Fund Delta,430000,PPA
+Fund Epsilon,310000,Prepay
+Fund Zeta,275000,Prepay
+Fund Eta,195000,Prepay
+Fund Theta,148000,Prepay
+Fund Iota,87000,Prepay
+Fund Kappa,62000,Prepay
